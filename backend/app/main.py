@@ -2,11 +2,20 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
+
+# Routers
 from app.routers.health import router as health_router
+from app.routers.applications import router as applications_router
+
+# DB (temporary create_all until Alembic)
+from app.db.base import Base
+from app.db.session import engine
+from app.db import models  # noqa: F401  (ensures models are registered)
+
 
 app = FastAPI(title=settings.app_name)
 
-# For now allow local dev; tighten later
+# CORS (allow your future frontend)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -15,7 +24,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Include routers with /api prefix
 app.include_router(health_router, prefix=settings.api_prefix)
+app.include_router(applications_router, prefix=settings.api_prefix)
+
+# Create tables on startup (TEMPORARY; later replace with Alembic migrations)
+@app.on_event("startup")
+def on_startup() -> None:
+    Base.metadata.create_all(bind=engine)
 
 @app.get("/")
 def root():
