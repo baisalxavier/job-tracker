@@ -5,9 +5,12 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.db.deps import get_db
-from app.db.models import Application as ApplicationModel
+from app.db.models import Application as ApplicationModel, User
 from app.schemas.application import ApplicationCreate, ApplicationOut, ApplicationStatus
 from app.schemas.common import PaginatedResponse
+from app.core.deps import get_current_user
+
+
 
 router = APIRouter(prefix="/applications", tags=["applications"])
 
@@ -25,17 +28,23 @@ router = APIRouter(prefix="/applications", tags=["applications"])
 # ----------------------------
 # CREATE
 # ----------------------------
-@router.post("/", response_model=ApplicationOut)
-def create_application(app: ApplicationCreate, db: Session = Depends(get_db)):
+@router.post("/", response_model=ApplicationOut, status_code=201)
+def create_application(
+    app: ApplicationCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     db_app = ApplicationModel(
         company=app.company,
         role=app.role,
         status=app.status.value,
+        user_id=current_user.id,
     )
     db.add(db_app)
     db.commit()
     db.refresh(db_app)
     return db_app
+
 
 
 
@@ -46,6 +55,7 @@ def create_application(app: ApplicationCreate, db: Session = Depends(get_db)):
 @router.get("/", response_model=PaginatedResponse[ApplicationOut])
 def list_applications(
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
     q: Optional[str] = Query(default=None, min_length=1, max_length=100),
     status: Optional[ApplicationStatus] = None,
     page: int = Query(default=1, ge=1),
@@ -54,6 +64,8 @@ def list_applications(
     sort_order: str = Query(default="desc"),
 ):
     query = db.query(ApplicationModel)
+    query = query.filter(ApplicationModel.user_id == current_user.id)
+
 
     if q:
         like = f"%{q}%"
@@ -103,11 +115,20 @@ def list_applications(
 # READ ONE
 # ----------------------------
 @router.get("/{app_id}", response_model=ApplicationOut)
-def get_application(app_id: int, db: Session = Depends(get_db)):
-    app = db.query(ApplicationModel).filter(ApplicationModel.id == app_id).first()
+def get_application(
+    app_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    app = (
+        db.query(ApplicationModel)
+        .filter(ApplicationModel.id == app_id, ApplicationModel.user_id == current_user.id)
+        .first()
+    )
     if not app:
         raise HTTPException(status_code=404, detail="Application not found")
     return app
+
 
 
 
@@ -116,11 +137,49 @@ def get_application(app_id: int, db: Session = Depends(get_db)):
 # UPDATE
 # ----------------------------
 @router.put("/{app_id}", response_model=ApplicationOut)
-def update_application(app_id: int, updated: ApplicationCreate, db: Session = Depends(get_db)):
-    db_app = db.query(ApplicationModel).filter(ApplicationModel.id == app_id).first()
+def update_application(
+    app_id: int,
+    updated: ApplicationCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # 1️ Fetch the application owned by this user
+    db_app = (
+        db.query(ApplicationModel)
+        .filter(
+            ApplicationModel.id == app_id,
+            ApplicationModel.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    # 2️ If not found → either doesn't exist or not owned by user
     if not db_app:
         raise HTTPException(status_code=404, detail="Application not found")
 
+    # =========================
+    # 3️ Duplicate CHECK (ADD HERE)
+    # =========================
+    duplicate = (
+        db.query(ApplicationModel)
+        .filter(
+            ApplicationModel.user_id == current_user.id,
+            ApplicationModel.company == updated.company,
+            ApplicationModel.role == updated.role,
+            ApplicationModel.id != app_id,  # exclude current record
+        )
+        .first()
+    )
+
+    if duplicate:
+        raise HTTPException(
+            status_code=409,
+            detail="Another application with the same company and role already exists",
+        )
+
+    # =========================
+    # 4️ Safe to update
+    # =========================
     db_app.company = updated.company
     db_app.role = updated.role
     db_app.status = updated.status.value
@@ -136,12 +195,25 @@ def update_application(app_id: int, updated: ApplicationCreate, db: Session = De
 # DELETE
 # ----------------------------
 @router.delete("/{app_id}")
-def delete_application(app_id: int, db: Session = Depends(get_db)):
-    app = db.query(ApplicationModel).filter(ApplicationModel.id == app_id).first()
-    if not app:
+def delete_application(
+    app_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    db_app = (
+        db.query(ApplicationModel)
+        .filter(
+            ApplicationModel.id == app_id,
+            ApplicationModel.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not db_app:
         raise HTTPException(status_code=404, detail="Application not found")
 
-    db.delete(app)
+    db.delete(db_app)
     db.commit()
     return {"message": "Deleted"}
+
 

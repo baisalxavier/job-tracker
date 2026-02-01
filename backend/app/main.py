@@ -6,6 +6,7 @@ from app.core.config import settings
 # Routers
 from app.routers.health import router as health_router
 from app.routers.applications import router as applications_router
+from app.routers.auth import router as auth_router
 
 
 
@@ -23,6 +24,7 @@ app.add_middleware(
 # Include routers with /api prefix
 app.include_router(health_router, prefix=settings.api_prefix)
 app.include_router(applications_router, prefix=settings.api_prefix)
+app.include_router(auth_router, prefix=settings.api_prefix) 
 
 # Create tables on startup (TEMPORARY; later replace with Alembic migrations)
 
