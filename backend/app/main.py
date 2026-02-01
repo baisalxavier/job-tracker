@@ -7,10 +7,6 @@ from app.core.config import settings
 from app.routers.health import router as health_router
 from app.routers.applications import router as applications_router
 
-# DB (temporary create_all until Alembic)
-from app.db.base import Base
-from app.db.session import engine
-from app.db import models  # noqa: F401  (ensures models are registered)
 
 
 app = FastAPI(title=settings.app_name)
@@ -29,9 +25,7 @@ app.include_router(health_router, prefix=settings.api_prefix)
 app.include_router(applications_router, prefix=settings.api_prefix)
 
 # Create tables on startup (TEMPORARY; later replace with Alembic migrations)
-@app.on_event("startup")
-def on_startup() -> None:
-    Base.metadata.create_all(bind=engine)
+
 
 @app.get("/")
 def root():
